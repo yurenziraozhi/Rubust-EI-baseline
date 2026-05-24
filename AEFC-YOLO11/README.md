@@ -1,10 +1,16 @@
-# AEFC-YOLO11
+# YOLO11-M WaterScenes Baseline
 
-本工程用于基于 WaterScenes 固定划分训练 YOLO11-M baseline，并逐步加入 UIAE、EAFC、MDCT，在 `adverse_lighting` 与 `adverse_weather` 两个专项测试集上评估鲁棒性。
+This repository is a reconstructed baseline-only training package for the
+WaterScenes YOLO11-M experiment. It intentionally does not include UIAE, EAFC,
+MDCT, or any full AEFC experimental modules.
 
-## 1. 服务器目录
+The baseline was originally trained before the project was placed under Git, so
+this repository is rebuilt from the saved training configuration, logs, and
+workspace files.
 
-建议保持如下结构：
+## Server Layout
+
+Keep the dataset folders next to `AEFC-YOLO11/`:
 
 ```text
 workdir/
@@ -19,19 +25,16 @@ workdir/
 `-- adverse_weather.txt
 ```
 
-`image/`、`detection/yolo/` 和五个 txt 与 `AEFC-YOLO11/` 同级。
+Raw data and generated datasets are ignored by Git. This repository only keeps
+code, configs, the YOLO11-M pretrained weight, and one sample image.
 
-## 2. 准备数据
+## Prepare Dataset
 
-先安装依赖：
+Run from `AEFC-YOLO11/`:
 
 ```bash
 pip install -r requirements.txt
-```
 
-在 `AEFC-YOLO11/` 目录执行：
-
-```bash
 python tools/prepare_waterscenes_yolo.py \
   --root .. \
   --image-dir image \
@@ -45,90 +48,100 @@ python tools/prepare_waterscenes_yolo.py \
   --mode hardlink
 ```
 
-## 3. 多卡 DDP + nohup 训练
+The fixed split sizes are:
 
-当前 `tools/train_aefc.py` 已适配 Ultralytics 多卡 DDP 和文件日志。默认训练 YOLO11-M baseline：
+```text
+train: 37884
+val:   10824
+test:   5412
+```
+
+## Train Baseline
+
+The baseline uses the official Ultralytics YOLO11-M detector initialized from
+`weights/yolo11m.pt`.
+
+```bash
+mkdir -p logs
+
+nohup python tools/train_baseline.py \
+  --cfg configs/train_baseline_1920.yaml \
+  --device 0,1,2,3 \
+  --project runs/aefc_yolo11 \
+  --name yolo11m_baseline \
+  --log-dir logs \
+  --log-file logs/yolo11m_baseline.log \
+  --log-interval 100 \
+  --save-period -1 \
+  --plots false \
+  > logs/yolo11m_baseline.nohup.out 2>&1 &
+```
+
+Equivalent helper:
 
 ```bash
 bash tools/train_ddp_nohup.sh
 ```
 
-默认使用 `0,1,2,3` 四张卡。要改卡号：
+## Baseline Config
 
-```bash
-GPUS=0,1 bash tools/train_ddp_nohup.sh
+```yaml
+model: weights/yolo11m.pt
+data: configs/waterscenes_full.yaml
+imgsz: 1920
+epochs: 200
+batch: 32
+optimizer: AdamW
+lr0: 0.001
+lrf: 0.01
+weight_decay: 0.0005
+momentum: 0.937
+warmup_epochs: 3
+warmup_momentum: 0.8
+warmup_bias_lr: 0.1
+cos_lr: true
+workers: 8
+device: 0,1,2,3
+amp: false
+seed: 42
 ```
 
-如果要使用物理卡 4、5，并通过 `CUDA_VISIBLE_DEVICES` 映射成逻辑卡 0、1：
+With 37,884 train images and global batch size 32, each epoch has:
 
-```bash
-VISIBLE_GPUS=4,5 DEVICE=0,1 GPUS=0,1 bash tools/train_ddp_nohup.sh
+```text
+ceil(37884 / 32) = 1184 steps
 ```
 
-训练日志写入：
+## Outputs
+
+The training script writes:
 
 ```text
 logs/yolo11m_baseline.log
 logs/yolo11m_baseline_epoch_metrics.csv
-```
-
-`nohup` 自身输出写入：
-
-```text
 logs/yolo11m_baseline.nohup.out
 ```
 
-训练日志为 JSONL，每行一条记录，包含：
-
-- `run_start`：模型、预训练权重、数据配置、batch、epoch、DDP 设备、优化器、学习率等；
-- `train_batch`：每 100 个 batch 输出一次 rank0 的训练进度和 loss；
-- `train_epoch_end`：每个 epoch 结束输出训练汇总；
-- `val_batch`：验证阶段每 100 个 batch 输出一次 rank0 验证进度；
-- `val_end`：验证结束输出 mAP、recall 等 Ultralytics 指标；
-- `run_end`：训练是否成功、耗时和异常信息。
-
-每轮验证结束后，脚本会同步写入一行 CSV：
+Ultralytics writes model checkpoints under:
 
 ```text
-logs/yolo11m_baseline_epoch_metrics.csv
+runs/aefc_yolo11/yolo11m_baseline/weights/
 ```
 
-字段包括 `epoch`、`box_loss`、`cls_loss`、`dfl_loss`、`precision`、`recall`、`map50`、`map50_95`、`fitness` 和 `lr`。
+Only `best.pt` and `last.pt` are kept by default when `save_period=-1`.
 
-## 4. 手动启动训练
+## Recorded Baseline Result
 
-也可以直接执行：
+From the saved validation output:
 
-```bash
-nohup python tools/train_aefc.py \
-  --cfg configs/train_aefc.yaml \
-  --device 0,1,2,3 \
-  --project runs/aefc_yolo11 \
-  --name yolo11m_baseline \
-  --log-dir logs \
-  --log-interval 100 \
-  > logs/yolo11m_baseline.nohup.out 2>&1 &
+```text
+Images: 10824
+Instances: 40517
+Precision: 0.711
+Recall: 0.562
+mAP50: 0.629
+mAP50-95: 0.373
 ```
 
-## 5. 专项测试
-
-```bash
-yolo detect val \
-  model=runs/aefc_yolo11/yolo11m_baseline/weights/best.pt \
-  data=configs/waterscenes_adverse_lighting.yaml \
-  imgsz=640 \
-  split=val
-
-yolo detect val \
-  model=runs/aefc_yolo11/yolo11m_baseline/weights/best.pt \
-  data=configs/waterscenes_adverse_weather.yaml \
-  imgsz=640 \
-  split=val
-```
-
-## 6. 当前实现状态
-
-- `models/uiae.py`：已按 BPW + KBL 两滤波器方案实现 UIAE 骨架。
-- `models/eafc.py`：已实现增强感知特征校准，当前保留逐通道空间门控。
-- `tools/train_aefc.py`：已支持 YOLO11-M baseline 的 DDP、nohup 和 JSONL 训练日志。
-- UIAE/EAFC/MDCT 尚未接入 Ultralytics 训练图。开启 `--use-uiae`、`--use-eafc` 或 `--use-mdct` 时脚本会拒绝启动，避免训练名和实际模型不一致。
+Use this result as the comparison point for later UIAE, EAFC, and full AEFC
+experiments.

@@ -7,15 +7,18 @@ DEVICE="${DEVICE:-$GPUS}"
 RUN_NAME="${RUN_NAME:-yolo11m_baseline}"
 PROJECT="${PROJECT:-runs/aefc_yolo11}"
 LOG_DIR="${LOG_DIR:-logs}"
+
 mkdir -p "${PROJECT}" "${LOG_DIR}"
 
-CUDA_VISIBLE_DEVICES="${VISIBLE_GPUS}" nohup python tools/train_aefc.py \
-  --cfg configs/train_aefc.yaml \
+CUDA_VISIBLE_DEVICES="${VISIBLE_GPUS}" nohup python tools/train_baseline.py \
+  --cfg configs/train_baseline_1920.yaml \
   --device "${DEVICE}" \
   --project "${PROJECT}" \
   --name "${RUN_NAME}" \
   --log-dir "${LOG_DIR}" \
   --log-interval 100 \
+  --save-period -1 \
+  --plots false \
   > "${LOG_DIR}/${RUN_NAME}.nohup.out" 2>&1 &
 
 echo "started pid=$!"
